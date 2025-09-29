@@ -1,0 +1,76 @@
+services:
+  # Inventory Service (no dependencies)
+  inventory-service:
+    build: ./inventory-service
+    ports:
+      - "9003:9003"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=inventory-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - microservices-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9003/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+  # Order Service (depends on inventory)
+  order-service:
+    build: ./order-service
+    ports:
+      - "9002:9002"
+    environment:
+      - INVENTORY_SERVICE_URL=http://inventory-service:9003
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=order-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - microservices-network
+    depends_on:
+      inventory-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9002/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+  # User Service (depends on order)
+  user-service:
+    build: ./user-service
+    ports:
+      - "9001:9001"
+    environment:
+      - ORDER_SERVICE_URL=http://order-service:9002
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_SERVICE_NAME=user-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - microservices-network
+    depends_on:
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+
+networks:
+  microservices-network:
+    driver: bridge
+    name: poc-docker-network
