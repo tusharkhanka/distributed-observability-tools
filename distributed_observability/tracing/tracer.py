@@ -11,7 +11,12 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.sampling import TraceIdRatioBasedSampler
+# Try to import sampler classes - use default if not available
+try:
+    from opentelemetry.sdk.trace.sampling import TraceIdRatioBasedSampler
+    SAMPLER_AVAILABLE = True
+except ImportError:
+    SAMPLER_AVAILABLE = False
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.trace import Status, StatusCode, set_tracer_provider
@@ -62,8 +67,8 @@ class TracingManager:
             # Create tracer provider
             self._tracer_provider = TracerProvider(resource=resource)
 
-            # Set sampling if configured
-            if self.config.sampling_rate is not None:
+            # Set sampling if configured and available
+            if self.config.sampling_rate is not None and SAMPLER_AVAILABLE:
                 sampler = TraceIdRatioBasedSampler(self.config.sampling_rate)
                 self._tracer_provider._sampler = sampler
 
@@ -89,8 +94,8 @@ class TracingManager:
 
             # Create tracer
             self._tracer = trace.get_tracer(
-                name=self.config.service_name,
-                version=self.config.service_version,
+                self.config.service_name,
+                self.config.service_version,
                 tracer_provider=self._tracer_provider
             )
 
@@ -124,14 +129,24 @@ class TracingManager:
         return self._is_setup and self._tracer is not None
 
 
-def setup_tracing(config: TracingConfig) -> TracingManager:
-    """Convenience function to initialize tracing from config."""
+def setup_tracing(config: TracingConfig):
+    """Convenience function to initialize tracing from config.
+
+    Returns:
+        Tuple of (TracingManager, RequestTracingMiddleware)
+    """
+    from ..framework.fastapi import RequestTracingMiddleware
+
     manager = TracingManager(config)
-    if manager.setup():
-        return manager
-    else:
-        # Return manager even if setup failed for graceful degradation
-        return manager
+    manager.setup()  # Setup regardless of success for graceful degradation
+
+    # Create middleware
+    middleware = RequestTracingMiddleware(
+        app=None,  # Will be set when added to FastAPI app
+        tracing_config=config
+    )
+
+    return manager, middleware
 
 
 class CorrelationManager:

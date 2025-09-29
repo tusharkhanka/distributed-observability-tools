@@ -3,5 +3,6 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 
-# Distributed Observability Tools
-distributed-observability-tools[httpx]
+# Distributed Observability Tools (local wheel)
+distributed_observability_tools-0.1.0-py3-none-any.whl
+httpx

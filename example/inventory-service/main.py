@@ -12,16 +12,9 @@ from distributed_observability import TracingConfig, setup_tracing
 SERVICE_NAME = "inventory-service"
 SERVICE_PORT = 9003
 
-# Configure structured JSON logging
+# Configure standard Python logging (tracing middleware handles structured logs)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Add structured JSON formatter if not already configured
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = StructuredJSONFormatter(SERVICE_NAME, SERVICE_PORT)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 
 
@@ -71,8 +64,9 @@ def create_app():
     # Setup tracing with the package
     tracer_manager, middleware = setup_tracing(config)
 
-    # Add middleware
-    app.add_middleware(middleware)
+    # Add middleware (pass the class and parameters, not the instance)
+    from distributed_observability.framework.fastapi import RequestTracingMiddleware
+    app.add_middleware(RequestTracingMiddleware, tracing_config=config)
 
     logger.info(f"🚀 Starting {SERVICE_NAME} with distributed-observability-tools")
     logger.info(f"📊 Tracing configured for SigNoz compatibility")

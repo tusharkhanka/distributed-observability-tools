@@ -3,7 +3,8 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies - copy wheel first, then requirements
+COPY distributed_observability_tools-0.1.0-py3-none-any.whl .
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 

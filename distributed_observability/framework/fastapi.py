@@ -71,11 +71,11 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             # Get current span (may be root span or child)
             current_span = trace.get_current_span()
 
+            # Initialize correlation_id outside the span check
+            correlation_id = self.span_manager.correlation_manager.get_correlation_id(headers_dict)
+
             # Instrument the span with request details and correlation ID
             if current_span and current_span.is_recording():
-                # Add correlation ID as span attributes (SigNoz compatibility)
-                correlation_id = self.span_manager.correlation_manager.get_correlation_id(headers_dict)
-
                 if correlation_id:
                     # Primary root-level span attributes (same hierarchical level as service.name)
                     current_span.set_attribute("correlation_id", correlation_id)
