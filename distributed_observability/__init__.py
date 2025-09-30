@@ -14,12 +14,26 @@ Example:
 
 __version__ = "0.1.0"
 __author__ = "Tushar Khanka"
-__email__ = "your-email@gmail.com"
+__email__ = "tusharkhanka@gmail.com"
 
-# Core tracing exports
+# Core tracing exports (always available)
 from .tracing import TracingConfig, setup_tracing, TracingManager
-from .framework.fastapi import RequestTracingMiddleware
-from .utils.client import instrument_httpx_client
+
+# Optional framework integrations
+try:
+    from .framework.fastapi import RequestTracingMiddleware
+    _FASTAPI_AVAILABLE = True
+except ImportError:
+    RequestTracingMiddleware = None
+    _FASTAPI_AVAILABLE = False
+
+# Optional utilities
+try:
+    from .utils.client import instrument_httpx_client
+    _HTTPX_AVAILABLE = True
+except ImportError:
+    instrument_httpx_client = None
+    _HTTPX_AVAILABLE = False
 
 __all__ = [
     # Version info
@@ -27,14 +41,15 @@ __all__ = [
     "__author__",
     "__email__",
 
-    # Core tracing
+    # Core tracing (always available)
     "TracingConfig",
     "setup_tracing",
     "TracingManager",
-
-    # Framework integrations
-    "RequestTracingMiddleware",
-
-    # Utilities
-    "instrument_httpx_client",
 ]
+
+# Add optional exports if available
+if _FASTAPI_AVAILABLE:
+    __all__.append("RequestTracingMiddleware")
+
+if _HTTPX_AVAILABLE:
+    __all__.append("instrument_httpx_client")

@@ -78,18 +78,18 @@ class TracingManager:
                 "insecure": self.config.collector_url.startswith("http://"),
             }
 
-            logger.info(f"🔧 Creating OTLP exporter with endpoint: {self.config.collector_url}")
-            logger.info(f"🔧 Exporter kwargs: {exporter_kwargs}")
+            logger.debug(f"Creating OTLP exporter with endpoint: {self.config.collector_url}")
+            logger.debug(f"Exporter kwargs: {exporter_kwargs}")
 
             try:
                 if self.config.collector_protocol.upper() == "HTTP":
                     # Use HTTP instead of gRPC
                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPOTLPSpanExporter
                     exporter = HTTPOTLPSpanExporter(**exporter_kwargs)
-                    logger.info("🔧 Created HTTP OTLP exporter")
+                    logger.debug("Created HTTP OTLP exporter")
                 else:
                     exporter = OTLPSpanExporter(**exporter_kwargs)
-                    logger.info("🔧 Created gRPC OTLP exporter")
+                    logger.debug("Created gRPC OTLP exporter")
 
                 # Add span processor - use SimpleSpanProcessor for immediate export during testing
                 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -97,21 +97,21 @@ class TracingManager:
                 # Create a custom span processor that logs exports
                 class LoggingSpanProcessor(SimpleSpanProcessor):
                     def on_end(self, span):
-                        logger.info(f"🔍 Span ending: {span.name} (trace_id: {span.get_span_context().trace_id:032x})")
+                        logger.debug(f"Span ending: {span.name} (trace_id: {span.get_span_context().trace_id:032x})")
                         try:
                             result = super().on_end(span)
-                            logger.info(f"✅ Span exported successfully: {span.name}")
+                            logger.debug(f"Span exported successfully: {span.name}")
                             return result
                         except Exception as e:
-                            logger.error(f"❌ Failed to export span {span.name}: {e}")
+                            logger.error(f"Failed to export span {span.name}: {e}")
                             raise
 
                 self._span_processor = LoggingSpanProcessor(exporter)
                 self._tracer_provider.add_span_processor(self._span_processor)
-                logger.info("🔧 Using LoggingSpanProcessor for immediate span export with debug logging")
+                logger.debug("Using LoggingSpanProcessor for immediate span export with debug logging")
 
             except Exception as e:
-                logger.error(f"❌ Failed to create OTLP exporter: {e}")
+                logger.error(f"Failed to create OTLP exporter: {e}")
                 raise
 
             # Set global tracer provider
@@ -125,11 +125,11 @@ class TracingManager:
             )
 
             self._is_setup = True
-            logger.info("✅ OpenTelemetry tracing setup successful")
+            logger.info("OpenTelemetry tracing setup successful")
             return True
 
         except Exception as e:
-            logger.warning(f"⚠️ OpenTelemetry setup failed: {e}")
+            logger.warning(f"OpenTelemetry setup failed: {e}")
             logger.warning("Tracing will be disabled")
             return False
 
@@ -165,7 +165,7 @@ def setup_tracing(config: TracingConfig):
     manager = TracingManager(config)
     success = manager.setup()  # Setup regardless of success for graceful degradation
 
-    logger.info(f"🔧 Tracing setup {'successful' if success else 'failed with graceful degradation'}")
+    logger.info(f"Tracing setup {'successful' if success else 'failed with graceful degradation'}")
 
     # Return manager and middleware configuration - pass TracingConfig object directly
     # FastAPI's add_middleware will call: RequestTracingMiddleware(app, tracing_config=config)
@@ -186,7 +186,7 @@ def instrument_fastapi_app(app, config: TracingConfig = None):
         from opentelemetry import trace
         provider = trace.get_tracer_provider()
         if hasattr(provider, '__class__') and 'Proxy' in provider.__class__.__name__:
-            logger.warning("⚠️ ProxyTracerProvider detected - traces may not be exported properly")
+            logger.warning("ProxyTracerProvider detected - traces may not be exported properly")
 
         # Configure FastAPI instrumentation to capture HTTP headers
         def request_hook(span, scope):
@@ -205,7 +205,7 @@ def instrument_fastapi_app(app, config: TracingConfig = None):
                     if header_name in headers:
                         span.set_attribute(f"http.request.header.{header_name}", headers[header_name])
                         span.set_attribute("correlation_id", headers[header_name])
-                        logger.info(f"🎯 Added {header_name} to span: {headers[header_name]}")
+                        logger.debug(f"Added {header_name} to span: {headers[header_name]}")
 
                 # Add other useful headers
                 useful_headers = ["user-agent", "x-forwarded-for", "x-real-ip", "authorization"]
@@ -219,10 +219,10 @@ def instrument_fastapi_app(app, config: TracingConfig = None):
 
         # Instrument the app with the request hook
         FastAPIInstrumentor.instrument_app(app, server_request_hook=request_hook)
-        logger.info("✅ FastAPI auto-instrumentation enabled with header capture")
+        logger.info("FastAPI auto-instrumentation enabled with header capture")
         return True
     except Exception as e:
-        logger.warning(f"⚠️ FastAPI auto-instrumentation setup failed: {e}")
+        logger.warning(f"FastAPI auto-instrumentation setup failed: {e}")
         return False
 
 

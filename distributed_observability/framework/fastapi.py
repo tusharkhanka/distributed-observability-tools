@@ -46,19 +46,19 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
         self.span_manager = SpanManager(tracing_config)
         self.custom_span_attributes = custom_span_attributes or {}
 
-        logger.info("🚀 FastAPI Request Tracing Middleware initialized")
-        logger.info(f"📊 Otel endpoint: {tracing_config.collector_url}")
-        logger.info("🎯 SigNoz-compatible correlation ID tracking enabled")
+        logger.info("FastAPI Request Tracing Middleware initialized")
+        logger.debug(f"OTEL endpoint: {tracing_config.collector_url}")
+        logger.debug("SigNoz-compatible correlation ID tracking enabled")
 
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with tracing instrumentation."""
 
         # Debug log - middleware called
-        logger.info("🔧 MIDDLEWARE CALLED for {request.method} {request.url.path}")
+        logger.debug(f"Middleware called for {request.method} {request.url.path}")
 
         # Skip tracing if not configured
         if not self.fastapi_config.enable_middleware:
-            logger.info("⚠️ Middleware disabled by config")
+            logger.debug("Middleware disabled by config")
             return await call_next(request)
 
         # Start timing
@@ -76,9 +76,9 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
 
         # Log correlation ID detection
         if correlation_id:
-            logger.info(f"🎯 CORRELATION ID DETECTED: {correlation_id}")
+            logger.debug(f"Correlation ID detected: {correlation_id}")
         else:
-            logger.warning("⚠️ NO CORRELATION ID FOUND in request headers")
+            logger.debug("No correlation ID found in request headers")
 
         # Get the current active span (created by FastAPI auto-instrumentation)
         # and add our correlation ID and custom attributes to it
@@ -86,13 +86,13 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             current_span = trace.get_current_span()
 
             if current_span and current_span.is_recording():
-                logger.info(f"🔍 Adding attributes to current span: {current_span}")
+                logger.debug(f"Adding attributes to current span: {current_span}")
 
                 # Set correlation ID attribute on the current span
                 if correlation_id:
                     current_span.set_attribute("correlation_id", correlation_id)
                     current_span.set_attribute("http.request.header.x-correlation-id", correlation_id)
-                    logger.info(f"✅ Added correlation_id to span: {correlation_id}")
+                    logger.debug(f"Added correlation_id to span: {correlation_id}")
 
                 # Add standard span attributes
                 current_span.set_attribute("service.name", self.tracing_config.service_name)
@@ -125,10 +125,10 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                     current_span.set_attribute(key, value)
 
                 # Log that attributes were set
-                logger.info(f"📊 SPAN ATTRIBUTES SET: correlation_id={correlation_id} on current span")
+                logger.debug(f"Span attributes set: correlation_id={correlation_id} on current span")
 
             else:
-                logger.warning("⚠️ No active span found to add correlation ID attributes")
+                logger.debug("No active span found to add correlation ID attributes")
 
             # Process the request (outside of our custom span context since we're using auto-instrumentation)
             try:
@@ -152,7 +152,7 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                     current_span.set_attribute("http.response.time_ms", process_time * 1000)
 
                 # Log response details
-                logger.info(f"📤 RESPONSE: status={response.status_code}, time={process_time:.3f}s")
+                logger.debug(f"Response: status={response.status_code}, time={process_time:.3f}s")
 
                 return response
 
@@ -164,7 +164,7 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                 raise
 
         except Exception as span_error:
-            logger.warning(f"⚠️ Failed to create span: {span_error}, processing without tracing")
+            logger.warning(f"Failed to create span: {span_error}, processing without tracing")
 
             # Fallback - process request without span
             try:
@@ -184,12 +184,12 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             response.headers["X-Processing-Time"] = str(process_time)
 
             # Log response details
-            logger.info(f"📤 RESPONSE (NO TRACING): status={response.status_code}, time={process_time:.3f}s")
+            logger.debug(f"Response (no tracing): status={response.status_code}, time={process_time:.3f}s")
 
             return response
 
         except Exception as middleware_error:
-            logger.warning(f"⚠️ Middleware error: {middleware_error}")
+            logger.warning(f"Middleware error: {middleware_error}")
             # Don't let middleware errors break the app
             try:
                 return await call_next(request)

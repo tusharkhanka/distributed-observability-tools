@@ -8,7 +8,38 @@ A comprehensive Python package for observability in distributed systems, providi
 
 ## 🚀 Quick Start
 
+### Installation
+
+```bash
+# Basic installation (core tracing only)
+pip install distributed-observability-tools
+
+# With FastAPI support
+pip install distributed-observability-tools[fastapi]
+
+# With HTTP client support
+pip install distributed-observability-tools[httpx]
+
+# Full installation (all features)
+pip install distributed-observability-tools[all]
+```
+
 ### Basic Usage
+
+```python
+from distributed_observability import TracingConfig, setup_tracing
+
+# Configure tracing
+config = TracingConfig(
+    service_name="my-service",
+    collector_url="http://otel-collector:4317"
+)
+
+# Setup tracing
+tracer_manager, middleware = setup_tracing(config)
+```
+
+### FastAPI Integration
 
 ```python
 from distributed_observability import TracingConfig, setup_tracing

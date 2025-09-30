@@ -80,7 +80,7 @@ class CorrelatedClient:
                 if key.lower() not in [h.lower() for h in request_headers.keys()]:
                     request_headers[key] = value
 
-        logger.info(f"📡 Outgoing {method} request to {url} with correlation headers: {correlation_headers}")
+        logger.debug(f"Outgoing {method} request to {url} with correlation headers: {correlation_headers}")
 
         return await self.client.request(method, url, headers=request_headers, **kwargs)
 
@@ -89,10 +89,10 @@ class CorrelatedClient:
         correlation_id = self._extract_current_correlation_id()
         if correlation_id:
             propagation_headers = self.correlation_manager.get_propagation_headers(correlation_id)
-            logger.debug(f"🔗 Propagating correlation ID: {correlation_id}")
+            logger.debug(f"Propagating correlation ID: {correlation_id}")
             return propagation_headers
         else:
-            logger.warning("⚠️ No correlation ID found in current context")
+            logger.debug("No correlation ID found in current context")
             return {}
 
     def _extract_current_correlation_id(self) -> Optional[str]:
@@ -148,7 +148,7 @@ def patch_httpx():
         logger.warning("httpx not available, skipping auto-instrumentation")
         return
 
-    logger.info("🔧 Patching httpx for automatic correlation header injection")
+    logger.debug("Patching httpx for automatic correlation header injection")
 
     original_request = httpx.AsyncClient.request
 
@@ -189,4 +189,4 @@ def patch_httpx():
 
     # Apply the patch
     httpx.AsyncClient.request = patched_request
-    logger.info("✅ httpx patched successfully")
+    logger.info("httpx patched successfully")

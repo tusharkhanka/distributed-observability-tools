@@ -1,17 +1,17 @@
 services:
   # Inventory Service (no dependencies)
   inventory-service:
-    build: ./inventory-service
+    build:
+      context: ..
+      dockerfile: example_usage/inventory-service/Dockerfile
     ports:
       - "9003:9003"
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
-      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-      - OTEL_SERVICE_NAME=inventory-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - microservices-network
+      - example-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9003/health"]
       interval: 15s
@@ -22,18 +22,18 @@ services:
 
   # Order Service (depends on inventory)
   order-service:
-    build: ./order-service
+    build:
+      context: ..
+      dockerfile: example_usage/order-service/Dockerfile
     ports:
       - "9002:9002"
     environment:
       - INVENTORY_SERVICE_URL=http://inventory-service:9003
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
-      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-      - OTEL_SERVICE_NAME=order-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - microservices-network
+      - example-network
     depends_on:
       inventory-service:
         condition: service_healthy
@@ -47,18 +47,18 @@ services:
 
   # User Service (depends on order)
   user-service:
-    build: ./user-service
+    build:
+      context: ..
+      dockerfile: example_usage/user-service/Dockerfile
     ports:
       - "9001:9001"
     environment:
       - ORDER_SERVICE_URL=http://order-service:9002
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317
-      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-      - OTEL_SERVICE_NAME=user-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - microservices-network
+      - example-network
     depends_on:
       order-service:
         condition: service_healthy
@@ -71,6 +71,6 @@ services:
     restart: unless-stopped
 
 networks:
-  microservices-network:
+  example-network:
     driver: bridge
-    name: poc-docker-network
+    name: example-usage-network

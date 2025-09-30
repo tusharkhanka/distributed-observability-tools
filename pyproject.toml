@@ -2,20 +2,37 @@
 name = "distributed-observability-tools"
 version = "0.1.0"
 description = "Comprehensive observability tools for distributed systems - tracing, correlation, and metrics"
-authors = ["Your Name <your-email@example.com>"]
+authors = ["Tushar Khanka <tusharkhanka@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "distributed_observability"}]
-repository = "https://github.com/your-org/distributed-observability-tools"
-homepage = "https://github.com/your-org/distributed-observability-tools"
+repository = "https://github.com/tusharkhanka/distributed-observability-tools"
+homepage = "https://github.com/tusharkhanka/distributed-observability-tools"
+documentation = "https://github.com/tusharkhanka/distributed-observability-tools#readme"
+keywords = ["observability", "tracing", "opentelemetry", "distributed-systems", "correlation-id", "fastapi", "microservices"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Distributed Computing",
+]
 
 [tool.poetry.dependencies]
 python = "^3.8"
 opentelemetry-sdk = "^1.21.0"
 opentelemetry-exporter-otlp-proto-grpc = "^1.21.0"
-opentelemetry-instrumentation-fastapi = "^0.42b0"
-opentelemetry-instrumentation-httpx = "^0.42b0"
-pydantic = "^2.5.0"
+opentelemetry-instrumentation-fastapi = {version = "^0.42b0", optional = true}
+opentelemetry-instrumentation-httpx = {version = "^0.42b0", optional = true}
+fastapi = {version = "^0.104.0", optional = true}
 httpx = {version = "^0.25.0", optional = true}
 
 [tool.poetry.group.dev.dependencies]
@@ -26,7 +43,9 @@ mypy = "^1.5.0"
 pytest-asyncio = "^0.21.0"
 
 [tool.poetry.extras]
-httpx = ["httpx"]
+fastapi = ["fastapi", "opentelemetry-instrumentation-fastapi"]
+httpx = ["httpx", "opentelemetry-instrumentation-httpx"]
+all = ["fastapi", "httpx", "opentelemetry-instrumentation-fastapi", "opentelemetry-instrumentation-httpx"]
 
 [build-system]
 requires = ["poetry-core"]
@@ -47,5 +66,7 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [tool.poetry.urls]
-"Bug Reports" = "https://github.com/your-org/distributed-observability-tools/issues"
-"Source" = "https://github.com/your-org/distributed-observability-tools"
+"Bug Reports" = "https://github.com/tusharkhanka/distributed-observability-tools/issues"
+"Source" = "https://github.com/tusharkhanka/distributed-observability-tools"
+"Documentation" = "https://github.com/tusharkhanka/distributed-observability-tools#readme"
+"Changelog" = "https://github.com/tusharkhanka/distributed-observability-tools/releases"
