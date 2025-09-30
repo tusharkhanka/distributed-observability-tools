@@ -60,18 +60,22 @@ def create_app():
         environment=os.getenv("ENVIRONMENT", "development")
     )
 
-    # Setup tracing with the package
-    tracer_manager, middleware = setup_tracing(config)
+    # Setup tracing with the package (this initializes OpenTelemetry and returns middleware config)
+    tracer_manager, middleware_config = setup_tracing(config)
 
-    # Add middleware (pass the class and parameters, not the instance)
-    from distributed_observability.framework.fastapi import RequestTracingMiddleware
-    app.add_middleware(RequestTracingMiddleware, tracing_config=config)
+    # Add the middleware - it's a tuple of (MiddlewareClass, config_dict)
+    middleware_class, middleware_kwargs = middleware_config
+    app.add_middleware(middleware_class, **middleware_kwargs)
 
     logger.info(f"🚀 Starting {SERVICE_NAME} with distributed-observability-tools")
     logger.info(f"📊 Tracing configured for SigNoz compatibility")
     logger.info(f"🎯 Correlation ID tracking enabled")
 
     otel_success = tracer_manager.is_ready()
+
+    # Instrument FastAPI app for auto-tracing
+    from distributed_observability.tracing.tracer import instrument_fastapi_app
+    instrument_fastapi_app(app, config)
 
     # Instrument httpx for automatic correlation propagation
     instrument_httpx_client()
@@ -130,18 +134,27 @@ def create_app():
     async def create_user(user: UserCreate):
         """Create new user"""
         logger.info(f"Creating user: {user.name}")
-        
-        # Check if email already exists
-        existing = next((u for u in users_db if u.email == user.email), None)
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already exists")
-        
-        new_id = max([u.id for u in users_db], default=0) + 1
-        new_user = User(id=new_id, name=user.name, email=user.email, status="active")
-        users_db.append(new_user)
-        
-        logger.info(f"Created user with ID: {new_id}")
-        return new_user
+
+        # Test manual span creation
+        from opentelemetry import trace
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("manual_user_creation") as span:
+            span.set_attribute("user.name", user.name)
+            span.set_attribute("user.email", user.email)
+            logger.info("🔍 Manual span created for user creation")
+
+            # Check if email already exists
+            existing = next((u for u in users_db if u.email == user.email), None)
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already exists")
+
+            new_id = max([u.id for u in users_db], default=0) + 1
+            new_user = User(id=new_id, name=user.name, email=user.email, status="active")
+            users_db.append(new_user)
+
+            span.set_attribute("user.id", new_id)
+            logger.info(f"Created user with ID: {new_id}")
+            return new_user
 
     @app.put("/api/v1/users/{user_id}", response_model=User)
     async def update_user(user_id: int, update: UserUpdate):

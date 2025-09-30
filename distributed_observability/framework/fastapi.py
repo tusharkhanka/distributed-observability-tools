@@ -53,8 +53,12 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process request with tracing instrumentation."""
 
+        # Debug log - middleware called
+        logger.info("🔧 MIDDLEWARE CALLED for {request.method} {request.url.path}")
+
         # Skip tracing if not configured
         if not self.fastapi_config.enable_middleware:
+            logger.info("⚠️ Middleware disabled by config")
             return await call_next(request)
 
         # Start timing
@@ -67,63 +71,66 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
         # Extract all headers for correlation ID detection
         headers_dict = dict(request.headers)
 
+        # Extract correlation ID first
+        correlation_id = self.span_manager.correlation_manager.get_correlation_id(headers_dict)
+
+        # Log correlation ID detection
+        if correlation_id:
+            logger.info(f"🎯 CORRELATION ID DETECTED: {correlation_id}")
+        else:
+            logger.warning("⚠️ NO CORRELATION ID FOUND in request headers")
+
+        # Get the current active span (created by FastAPI auto-instrumentation)
+        # and add our correlation ID and custom attributes to it
         try:
-            # Get current span (may be root span or child)
             current_span = trace.get_current_span()
 
-            # Initialize correlation_id outside the span check
-            correlation_id = self.span_manager.correlation_manager.get_correlation_id(headers_dict)
-
-            # Instrument the span with request details and correlation ID
             if current_span and current_span.is_recording():
+                logger.info(f"🔍 Adding attributes to current span: {current_span}")
+
+                # Set correlation ID attribute on the current span
                 if correlation_id:
-                    # Primary root-level span attributes (same hierarchical level as service.name)
                     current_span.set_attribute("correlation_id", correlation_id)
+                    current_span.set_attribute("http.request.header.x-correlation-id", correlation_id)
+                    logger.info(f"✅ Added correlation_id to span: {correlation_id}")
 
-                    # Standard span attributes
-                    current_span.set_attribute("service.name", self.tracing_config.service_name)
-                    current_span.set_attribute("service.port", getattr(self.tracing_config, 'service_port', 8000))
-                    current_span.set_attribute("request.method", request.method)
-                    current_span.set_attribute("request.path", request.url.path)
-                    current_span.set_attribute("client.ip", client_host)
+                # Add standard span attributes
+                current_span.set_attribute("service.name", self.tracing_config.service_name)
+                current_span.set_attribute("service.port", getattr(self.tracing_config, 'service_port', 8000))
+                current_span.set_attribute("client.ip", client_host)
 
-                    # CloudFront/Lambda@Edge specific attributes
-                    edge_location = headers_dict.get('x-edge-location')
-                    if edge_location and edge_location != 'not-found':
-                        current_span.set_attribute("cloudfront.edge_location", edge_location)
+                # Add request headers as span attributes
+                request_id = headers_dict.get('x-request-id')
+                if request_id and request_id != 'not-found':
+                    current_span.set_attribute("cloudfront.request_id", request_id)
+                    current_span.set_attribute("x-request-id", request_id)
+                    current_span.set_attribute("http.request.header.x-request-id", request_id)
 
-                    cf_id = headers_dict.get('x-amz-cf-id')
-                    if cf_id and cf_id != 'not-found':
-                        current_span.set_attribute("cloudfront.distribution_id", cf_id)
+                # Add CloudFront/Lambda@Edge specific attributes
+                edge_location = headers_dict.get('x-edge-location')
+                if edge_location and edge_location != 'not-found':
+                    current_span.set_attribute("cloudfront.edge_location", edge_location)
+                    current_span.set_attribute("x-edge-location", edge_location)
 
-                    request_id = headers_dict.get('x-request-id')
-                    if request_id and request_id != 'not-found':
-                        current_span.set_attribute("cloudfront.request_id", request_id)
+                cf_id = headers_dict.get('x-amz-cf-id')
+                if cf_id and cf_id != 'not-found':
+                    current_span.set_attribute("cloudfront.distribution_id", cf_id)
 
-                    # SigNoz-compatible nested attributes (backward compatibility)
+                # Add multiple correlation ID attribute formats for compatibility
+                if correlation_id:
                     current_span.set_attribute("correlation.id", correlation_id)
                     current_span.set_attribute("x-correlation-id", correlation_id)
-                    current_span.set_attribute("http.request.header.x-correlation-id", correlation_id)
-
-                    if edge_location and edge_location != 'not-found':
-                        current_span.set_attribute("x-edge-location", edge_location)
-                    if request_id and request_id != 'not-found':
-                        current_span.set_attribute("x-request-id", request_id)
-                    if cf_id and cf_id != 'not-found':
-                        current_span.set_attribute("x-amz-cf-id", cf_id)
-
                 # Add custom span attributes
                 for key, value in self.custom_span_attributes.items():
                     current_span.set_attribute(key, value)
 
-                # Log correlation ID detection
-                if correlation_id:
-                    logger.info(f"🎯 CORRELATION ID DETECTED: {correlation_id}")
-                    logger.info(f"📊 SPAN ATTRIBUTES SET: correlation_id={correlation_id}")
-                else:
-                    logger.warning("⚠️ NO CORRELATION ID FOUND in request headers")
+                # Log that attributes were set
+                logger.info(f"📊 SPAN ATTRIBUTES SET: correlation_id={correlation_id} on current span")
 
-            # Process the request
+            else:
+                logger.warning("⚠️ No active span found to add correlation ID attributes")
+
+            # Process the request (outside of our custom span context since we're using auto-instrumentation)
             try:
                 response = await call_next(request)
 
@@ -138,21 +145,48 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
 
                 response.headers["X-Processing-Time"] = str(process_time)
 
+                # Add response attributes to current span
+                current_span = trace.get_current_span()
+                if current_span and current_span.is_recording():
+                    current_span.set_attribute("http.response.status_code", response.status_code)
+                    current_span.set_attribute("http.response.time_ms", process_time * 1000)
+
                 # Log response details
                 logger.info(f"📤 RESPONSE: status={response.status_code}, time={process_time:.3f}s")
 
                 return response
 
             except Exception as e:
-                # Record exception in current span
+                # Record exception on current span if available
+                current_span = trace.get_current_span()
                 if current_span and current_span.is_recording():
                     self.span_manager.record_exception(current_span, e)
-
-                # Log error details
-                logger.error(f"❌ REQUEST ERROR: {type(e).__name__}: {e}")
-
-                # Re-raise to maintain normal error handling
                 raise
+
+        except Exception as span_error:
+            logger.warning(f"⚠️ Failed to create span: {span_error}, processing without tracing")
+
+            # Fallback - process request without span
+            try:
+                response = await call_next(request)
+            except Exception as e:
+                raise
+
+            # Calculate processing time
+            process_time = time.time() - start_time
+
+            # Add custom headers to response for debugging
+            response.headers["X-Service-Name"] = self.tracing_config.service_name
+
+            if correlation_id:
+                response.headers["X-Correlation-ID"] = correlation_id
+
+            response.headers["X-Processing-Time"] = str(process_time)
+
+            # Log response details
+            logger.info(f"📤 RESPONSE (NO TRACING): status={response.status_code}, time={process_time:.3f}s")
+
+            return response
 
         except Exception as middleware_error:
             logger.warning(f"⚠️ Middleware error: {middleware_error}")

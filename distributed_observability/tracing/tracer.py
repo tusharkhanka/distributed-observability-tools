@@ -78,16 +78,41 @@ class TracingManager:
                 "insecure": self.config.collector_url.startswith("http://"),
             }
 
-            if self.config.collector_protocol.upper() == "HTTP":
-                # Use HTTP instead of gRPC
-                from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPOTLPSpanExporter
-                exporter = HTTPOTLPSpanExporter(**exporter_kwargs)
-            else:
-                exporter = OTLPSpanExporter(**exporter_kwargs)
+            logger.info(f"🔧 Creating OTLP exporter with endpoint: {self.config.collector_url}")
+            logger.info(f"🔧 Exporter kwargs: {exporter_kwargs}")
 
-            # Add span processor
-            self._span_processor = BatchSpanProcessor(exporter)
-            self._tracer_provider.add_span_processor(self._span_processor)
+            try:
+                if self.config.collector_protocol.upper() == "HTTP":
+                    # Use HTTP instead of gRPC
+                    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPOTLPSpanExporter
+                    exporter = HTTPOTLPSpanExporter(**exporter_kwargs)
+                    logger.info("🔧 Created HTTP OTLP exporter")
+                else:
+                    exporter = OTLPSpanExporter(**exporter_kwargs)
+                    logger.info("🔧 Created gRPC OTLP exporter")
+
+                # Add span processor - use SimpleSpanProcessor for immediate export during testing
+                from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+                # Create a custom span processor that logs exports
+                class LoggingSpanProcessor(SimpleSpanProcessor):
+                    def on_end(self, span):
+                        logger.info(f"🔍 Span ending: {span.name} (trace_id: {span.get_span_context().trace_id:032x})")
+                        try:
+                            result = super().on_end(span)
+                            logger.info(f"✅ Span exported successfully: {span.name}")
+                            return result
+                        except Exception as e:
+                            logger.error(f"❌ Failed to export span {span.name}: {e}")
+                            raise
+
+                self._span_processor = LoggingSpanProcessor(exporter)
+                self._tracer_provider.add_span_processor(self._span_processor)
+                logger.info("🔧 Using LoggingSpanProcessor for immediate span export with debug logging")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to create OTLP exporter: {e}")
+                raise
 
             # Set global tracer provider
             set_tracer_provider(self._tracer_provider)
@@ -133,20 +158,72 @@ def setup_tracing(config: TracingConfig):
     """Convenience function to initialize tracing from config.
 
     Returns:
-        Tuple of (TracingManager, RequestTracingMiddleware)
+        Tuple of (TracingManager, (RequestTracingMiddleware, kwargs_dict))
     """
     from ..framework.fastapi import RequestTracingMiddleware
 
     manager = TracingManager(config)
-    manager.setup()  # Setup regardless of success for graceful degradation
+    success = manager.setup()  # Setup regardless of success for graceful degradation
 
-    # Create middleware
-    middleware = RequestTracingMiddleware(
-        app=None,  # Will be set when added to FastAPI app
-        tracing_config=config
-    )
+    logger.info(f"🔧 Tracing setup {'successful' if success else 'failed with graceful degradation'}")
 
-    return manager, middleware
+    # Return manager and middleware configuration - pass TracingConfig object directly
+    # FastAPI's add_middleware will call: RequestTracingMiddleware(app, tracing_config=config)
+    middleware_config = (RequestTracingMiddleware, {'tracing_config': config})
+
+    return manager, middleware_config
+
+
+def instrument_fastapi_app(app, config: TracingConfig = None):
+    """Instrument a FastAPI app with OpenTelemetry auto-instrumentation.
+
+    This should be called after the FastAPI app is created and after setup_tracing().
+    """
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        # Make sure we have a proper tracer provider set before instrumenting
+        from opentelemetry import trace
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, '__class__') and 'Proxy' in provider.__class__.__name__:
+            logger.warning("⚠️ ProxyTracerProvider detected - traces may not be exported properly")
+
+        # Configure FastAPI instrumentation to capture HTTP headers
+        def request_hook(span, scope):
+            """Hook to add custom attributes to FastAPI spans."""
+            if span and span.is_recording():
+                # Extract headers from ASGI scope
+                headers = {}
+                for name, value in scope.get("headers", []):
+                    header_name = name.decode("latin-1").lower()
+                    header_value = value.decode("latin-1")
+                    headers[header_name] = header_value
+
+                # Add correlation ID headers as span attributes
+                correlation_headers = ["x-correlation-id", "x-request-id", "correlation-id"]
+                for header_name in correlation_headers:
+                    if header_name in headers:
+                        span.set_attribute(f"http.request.header.{header_name}", headers[header_name])
+                        span.set_attribute("correlation_id", headers[header_name])
+                        logger.info(f"🎯 Added {header_name} to span: {headers[header_name]}")
+
+                # Add other useful headers
+                useful_headers = ["user-agent", "x-forwarded-for", "x-real-ip", "authorization"]
+                for header_name in useful_headers:
+                    if header_name in headers:
+                        # Don't log authorization header value for security
+                        if header_name == "authorization":
+                            span.set_attribute(f"http.request.header.{header_name}", "[REDACTED]")
+                        else:
+                            span.set_attribute(f"http.request.header.{header_name}", headers[header_name])
+
+        # Instrument the app with the request hook
+        FastAPIInstrumentor.instrument_app(app, server_request_hook=request_hook)
+        logger.info("✅ FastAPI auto-instrumentation enabled with header capture")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ FastAPI auto-instrumentation setup failed: {e}")
+        return False
 
 
 class CorrelationManager:

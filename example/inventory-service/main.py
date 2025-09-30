@@ -64,6 +64,10 @@ def create_app():
     # Setup tracing with the package
     tracer_manager, middleware = setup_tracing(config)
 
+    # Instrument FastAPI app for auto-tracing
+    from distributed_observability.tracing.tracer import instrument_fastapi_app
+    instrument_fastapi_app(app, config)
+
     # Add middleware (pass the class and parameters, not the instance)
     from distributed_observability.framework.fastapi import RequestTracingMiddleware
     app.add_middleware(RequestTracingMiddleware, tracing_config=config)
