@@ -12,12 +12,13 @@ Example:
     >>> tracer, middleware = setup_tracing(config)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Tushar Khanka"
 __email__ = "tusharkhanka@gmail.com"
 
 # Core tracing exports (always available)
-from .tracing import TracingConfig, setup_tracing, TracingManager
+from .tracing import TracingConfig, setup_tracing, TracingManager, trace_function, add_span_attributes
+from .core.config import FastAPIConfig, HTTPClientConfig, match_header_pattern
 
 # Optional framework integrations
 try:
@@ -26,6 +27,33 @@ try:
 except ImportError:
     RequestTracingMiddleware = None
     _FASTAPI_AVAILABLE = False
+
+# Optional Celery integration
+try:
+    from .framework.celery import instrument_celery
+    _CELERY_AVAILABLE = True
+except ImportError:
+    instrument_celery = None
+    _CELERY_AVAILABLE = False
+
+# Optional database integrations
+try:
+    from .framework.database import instrument_sqlalchemy, instrument_redis, instrument_boto3
+    _DATABASE_AVAILABLE = True
+except ImportError:
+    instrument_sqlalchemy = None
+    instrument_redis = None
+    instrument_boto3 = None
+    _DATABASE_AVAILABLE = False
+
+# Optional gRPC integration
+try:
+    from .framework.grpc import instrument_grpc_client, instrument_grpc_server
+    _GRPC_AVAILABLE = True
+except ImportError:
+    instrument_grpc_client = None
+    instrument_grpc_server = None
+    _GRPC_AVAILABLE = False
 
 # Optional utilities
 try:
@@ -45,11 +73,27 @@ __all__ = [
     "TracingConfig",
     "setup_tracing",
     "TracingManager",
+    "trace_function",
+    "add_span_attributes",
+
+    # Configuration classes
+    "FastAPIConfig",
+    "HTTPClientConfig",
+    "match_header_pattern",
 ]
 
 # Add optional exports if available
 if _FASTAPI_AVAILABLE:
     __all__.append("RequestTracingMiddleware")
+
+if _CELERY_AVAILABLE:
+    __all__.append("instrument_celery")
+
+if _DATABASE_AVAILABLE:
+    __all__.extend(["instrument_sqlalchemy", "instrument_redis", "instrument_boto3"])
+
+if _GRPC_AVAILABLE:
+    __all__.extend(["instrument_grpc_client", "instrument_grpc_server"])
 
 if _HTTPX_AVAILABLE:
     __all__.append("instrument_httpx_client")

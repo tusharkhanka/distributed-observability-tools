@@ -52,7 +52,7 @@ class TracingManager:
                 "service.version": self.config.service_version,
                 "service.instance.id": str(uuid.uuid4()),
                 "telemetry.sdk.name": "distributed-observability-tools",
-                "telemetry.sdk.version": "0.1.0",
+                "telemetry.sdk.version": "0.1.1",
             }
 
             # Add custom resource attributes
@@ -174,19 +174,32 @@ def setup_tracing(config: TracingConfig):
     return manager, middleware_config
 
 
-def instrument_fastapi_app(app, config: TracingConfig = None):
+def instrument_fastapi_app(app, config: TracingConfig = None, fastapi_config=None):
     """Instrument a FastAPI app with OpenTelemetry auto-instrumentation.
 
     This should be called after the FastAPI app is created and after setup_tracing().
+
+    Args:
+        app: FastAPI application instance
+        config: TracingConfig instance (optional, for backward compatibility)
+        fastapi_config: FastAPIConfig instance with header capture configuration
     """
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from ..core.config import FastAPIConfig
 
         # Make sure we have a proper tracer provider set before instrumenting
         from opentelemetry import trace
         provider = trace.get_tracer_provider()
         if hasattr(provider, '__class__') and 'Proxy' in provider.__class__.__name__:
             logger.warning("ProxyTracerProvider detected - traces may not be exported properly")
+
+        # Use provided fastapi_config or create default
+        if fastapi_config is None:
+            fastapi_config = FastAPIConfig()
+
+        logger.debug(f"Configuring header capture with {len(fastapi_config.capture_request_headers)} explicit headers "
+                    f"and {len(fastapi_config.header_patterns)} patterns")
 
         # Configure FastAPI instrumentation to capture HTTP headers
         def request_hook(span, scope):
@@ -199,27 +212,36 @@ def instrument_fastapi_app(app, config: TracingConfig = None):
                     header_value = value.decode("latin-1")
                     headers[header_name] = header_value
 
-                # Add correlation ID headers as span attributes
-                correlation_headers = ["x-correlation-id", "x-request-id", "correlation-id"]
-                for header_name in correlation_headers:
-                    if header_name in headers:
-                        span.set_attribute(f"http.request.header.{header_name}", headers[header_name])
-                        span.set_attribute("correlation_id", headers[header_name])
-                        logger.debug(f"Added {header_name} to span: {headers[header_name]}")
+                # Track if we found a correlation ID
+                correlation_id = None
 
-                # Add other useful headers
-                useful_headers = ["user-agent", "x-forwarded-for", "x-real-ip", "authorization"]
-                for header_name in useful_headers:
-                    if header_name in headers:
-                        # Don't log authorization header value for security
-                        if header_name == "authorization":
-                            span.set_attribute(f"http.request.header.{header_name}", "[REDACTED]")
+                # Iterate through all headers and capture based on configuration
+                for header_name, header_value in headers.items():
+                    # Check if this header should be captured
+                    if fastapi_config.should_capture_header(header_name):
+                        # Check if this header should be redacted
+                        if fastapi_config.should_redact_header(header_name):
+                            value_to_set = "[REDACTED]"
+                            logger.debug(f"Capturing header {header_name} with redacted value")
                         else:
-                            span.set_attribute(f"http.request.header.{header_name}", headers[header_name])
+                            value_to_set = header_value
+                            logger.debug(f"Capturing header {header_name}: {header_value}")
+
+                        # Set the header as a span attribute
+                        span.set_attribute(f"http.request.header.{header_name}", value_to_set)
+
+                        # Check if this is a correlation ID header
+                        if "correlation" in header_name or "request-id" in header_name:
+                            if not correlation_id:  # Use first correlation header found
+                                correlation_id = header_value
+                                span.set_attribute("correlation_id", correlation_id)
+                                logger.debug(f"Set correlation_id from {header_name}: {correlation_id}")
 
         # Instrument the app with the request hook
         FastAPIInstrumentor.instrument_app(app, server_request_hook=request_hook)
-        logger.info("FastAPI auto-instrumentation enabled with header capture")
+        logger.info(f"FastAPI auto-instrumentation enabled with configurable header capture "
+                   f"({len(fastapi_config.capture_request_headers)} headers, "
+                   f"{len(fastapi_config.header_patterns)} patterns)")
         return True
     except Exception as e:
         logger.warning(f"FastAPI auto-instrumentation setup failed: {e}")

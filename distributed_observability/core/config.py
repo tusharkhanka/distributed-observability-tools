@@ -1,9 +1,34 @@
 """Base configuration classes for observability components."""
 import os
+import fnmatch
 from typing import Optional, Dict, Any, List
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field, validator
+
+
+def match_header_pattern(header_name: str, patterns: List[str]) -> bool:
+    """
+    Check if a header name matches any of the given patterns.
+
+    Supports wildcard patterns using fnmatch (e.g., 'x-*' matches 'x-correlation-id').
+
+    Args:
+        header_name: The header name to check (case-insensitive)
+        patterns: List of patterns to match against
+
+    Returns:
+        True if header matches any pattern, False otherwise
+    """
+    if not patterns:
+        return False
+
+    header_lower = header_name.lower()
+    for pattern in patterns:
+        pattern_lower = pattern.lower()
+        if fnmatch.fnmatch(header_lower, pattern_lower):
+            return True
+    return False
 
 
 class BaseConfig(BaseModel, ABC):
@@ -97,6 +122,62 @@ class FastAPIConfig(BaseModel):
         default=True,
         description="Whether to record exceptions in spans",
     )
+    capture_request_headers: List[str] = Field(
+        default=[
+            "x-correlation-id",
+            "x-request-id",
+            "correlation-id",
+            "user-agent",
+            "x-forwarded-for",
+            "x-real-ip",
+            "x-edge-location",
+            "x-amz-cf-id"
+        ],
+        description="HTTP request headers to capture as span attributes",
+    )
+    redact_headers: List[str] = Field(
+        default=["authorization", "cookie", "x-api-key", "api-key"],
+        description="Headers to redact (capture but mask value for security)",
+    )
+    header_patterns: List[str] = Field(
+        default=[],
+        description="Wildcard patterns for headers to capture (e.g., 'x-*' captures all x- headers)",
+    )
+
+    def should_capture_header(self, header_name: str) -> bool:
+        """
+        Check if a header should be captured based on configuration.
+
+        Args:
+            header_name: The header name to check
+
+        Returns:
+            True if header should be captured, False otherwise
+        """
+        header_lower = header_name.lower()
+
+        # Check explicit header list
+        if header_lower in [h.lower() for h in self.capture_request_headers]:
+            return True
+
+        # Check patterns
+        if match_header_pattern(header_name, self.header_patterns):
+            return True
+
+        return False
+
+    def should_redact_header(self, header_name: str) -> bool:
+        """
+        Check if a header value should be redacted.
+
+        Args:
+            header_name: The header name to check
+
+        Returns:
+            True if header should be redacted, False otherwise
+        """
+        header_lower = header_name.lower()
+        return header_lower in [h.lower() for h in self.redact_headers]
 
 
 class HTTPClientConfig(BaseModel):
@@ -111,9 +192,57 @@ class HTTPClientConfig(BaseModel):
         description="Enable requests library instrumentation",
     )
     capture_headers: List[str] = Field(
-        default=["x-*"],
-        description="HTTP headers to capture in spans",
+        default=[
+            "x-correlation-id",
+            "x-request-id",
+            "user-agent",
+            "content-type"
+        ],
+        description="HTTP headers to capture in outgoing request spans",
     )
+    redact_headers: List[str] = Field(
+        default=["authorization", "cookie", "x-api-key", "api-key"],
+        description="Headers to redact in outgoing requests (capture but mask value)",
+    )
+    header_patterns: List[str] = Field(
+        default=["x-*"],
+        description="Wildcard patterns for headers to capture in outgoing requests",
+    )
+
+    def should_capture_header(self, header_name: str) -> bool:
+        """
+        Check if a header should be captured based on configuration.
+
+        Args:
+            header_name: The header name to check
+
+        Returns:
+            True if header should be captured, False otherwise
+        """
+        header_lower = header_name.lower()
+
+        # Check explicit header list
+        if header_lower in [h.lower() for h in self.capture_headers]:
+            return True
+
+        # Check patterns
+        if match_header_pattern(header_name, self.header_patterns):
+            return True
+
+        return False
+
+    def should_redact_header(self, header_name: str) -> bool:
+        """
+        Check if a header value should be redacted.
+
+        Args:
+            header_name: The header name to check
+
+        Returns:
+            True if header should be redacted, False otherwise
+        """
+        header_lower = header_name.lower()
+        return header_lower in [h.lower() for h in self.redact_headers]
 
 
 class ObservabilityConfig(BaseModel):

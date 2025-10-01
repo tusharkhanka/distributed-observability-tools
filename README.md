@@ -91,6 +91,107 @@ app = FastAPI()
 app.add_middleware(RequestTracingMiddleware, tracing_config=config, fastapi_config=fastapi_config)
 ```
 
+### Custom HTTP Header Capture
+
+Configure which HTTP request headers are captured as OpenTelemetry span attributes:
+
+```python
+from distributed_observability import TracingConfig, FastAPIConfig, setup_tracing
+from distributed_observability.tracing.tracer import instrument_fastapi_app
+from fastapi import FastAPI
+
+# Configure tracing
+tracing_config = TracingConfig(
+    service_name="my-service",
+    collector_url="http://otel-collector:4317"
+)
+
+# Configure custom header capture
+fastapi_config = FastAPIConfig(
+    enable_middleware=True,
+    # Explicit list of headers to capture
+    capture_request_headers=[
+        "x-correlation-id",
+        "x-request-id",
+        "user-agent",
+        "x-tenant-id",      # Custom business header
+        "x-user-role",      # Custom business header
+    ],
+    # Headers to redact (captured but value masked)
+    redact_headers=[
+        "authorization",
+        "cookie",
+        "x-api-key"
+    ],
+    # Wildcard patterns for header matching
+    header_patterns=[
+        "x-*",              # Capture all headers starting with "x-"
+        "*-id",             # Capture all headers ending with "-id"
+        "cf-*"              # Capture all CloudFlare headers
+    ]
+)
+
+# Setup tracing
+tracer_manager, middleware_config = setup_tracing(tracing_config)
+middleware_class, middleware_kwargs = middleware_config
+
+# Add custom FastAPIConfig to middleware
+middleware_kwargs['fastapi_config'] = fastapi_config
+
+app = FastAPI()
+app.add_middleware(middleware_class, **middleware_kwargs)
+
+# Instrument FastAPI with custom config
+instrument_fastapi_app(app, tracing_config, fastapi_config)
+```
+
+**Header Pattern Matching:**
+
+The `header_patterns` field supports wildcard patterns using `fnmatch` syntax:
+
+- `x-*` - Matches all headers starting with "x-" (e.g., `x-correlation-id`, `x-tenant-id`)
+- `*-id` - Matches all headers ending with "-id" (e.g., `tenant-id`, `request-id`)
+- `cf-*` - Matches all CloudFlare headers (e.g., `cf-ray`, `cf-connecting-ip`)
+- `cloudfront-*` - Matches all CloudFront headers
+
+**Header Redaction:**
+
+Headers listed in `redact_headers` will be captured as span attributes but their values will be replaced with `[REDACTED]` for security. This is useful for sensitive headers like:
+
+- `authorization` - OAuth tokens, API keys
+- `cookie` - Session cookies
+- `x-api-key` - API authentication keys
+- `x-secret-*` - Any custom secret headers
+
+**Default Configuration:**
+
+If no `FastAPIConfig` is provided, the following defaults are used:
+
+```python
+# Default headers captured
+capture_request_headers = [
+    "x-correlation-id",
+    "x-request-id",
+    "correlation-id",
+    "user-agent",
+    "x-forwarded-for",
+    "x-real-ip",
+    "x-edge-location",
+    "x-amz-cf-id"
+]
+
+# Default headers redacted
+redact_headers = [
+    "authorization",
+    "cookie",
+    "x-api-key",
+    "api-key"
+]
+
+# Default patterns (empty - no wildcard matching)
+header_patterns = []
+```
+
 ## 📦 Installation
 
 ### Basic Installation
@@ -126,6 +227,13 @@ poetry install  # or pip install -e .
 - Cross-service correlation ID propagation
 - SigNoz-compatible span attributes (`correlation_id`)
 - Multiple header format support
+
+### ✅ Configurable Header Capture
+- **Explicit Header Lists**: Specify exact headers to capture
+- **Wildcard Pattern Matching**: Use patterns like `x-*` to capture multiple headers
+- **Header Redaction**: Automatically redact sensitive headers (authorization, cookies, API keys)
+- **Per-Framework Configuration**: Different settings for FastAPI and HTTP clients
+- **Backward Compatible**: Sensible defaults that work out of the box
 
 ### ✅ Framework Integration
 - **FastAPI**: Automatic middleware for request tracing
@@ -205,12 +313,84 @@ app.add_middleware(RequestTracingMiddleware,
 
 ```python
 from distributed_observability.utils import instrument_httpx_client
+from distributed_observability import HTTPClientConfig
 
-# Create correlated client
+# Create correlated client with custom header capture
+http_config = HTTPClientConfig(
+    enable_httpx=True,
+    capture_headers=[
+        "x-correlation-id",
+        "x-request-id",
+        "user-agent"
+    ],
+    redact_headers=["authorization", "cookie"],
+    header_patterns=["x-*"]  # Capture all x- headers
+)
+
 client = instrument_httpx_client()
 
 # All requests will include correlation headers automatically
 response = await client.get("http://api.example.com/users")
+```
+
+#### FastAPIConfig
+
+Configure header capture for incoming requests:
+
+```python
+from distributed_observability import FastAPIConfig
+
+fastapi_config = FastAPIConfig(
+    enable_middleware=True,
+    record_exceptions=True,
+    # Headers to capture as span attributes
+    capture_request_headers=[
+        "x-correlation-id",
+        "x-request-id",
+        "user-agent",
+        "x-tenant-id",
+        "x-user-role"
+    ],
+    # Headers to redact (capture but mask value)
+    redact_headers=[
+        "authorization",
+        "cookie",
+        "x-api-key"
+    ],
+    # Wildcard patterns for header matching
+    header_patterns=[
+        "x-*",      # All headers starting with x-
+        "*-id",     # All headers ending with -id
+        "cf-*"      # All CloudFlare headers
+    ]
+)
+```
+
+#### HTTPClientConfig
+
+Configure header capture for outgoing requests:
+
+```python
+from distributed_observability import HTTPClientConfig
+
+http_config = HTTPClientConfig(
+    enable_httpx=True,
+    # Headers to capture in outgoing request spans
+    capture_headers=[
+        "x-correlation-id",
+        "x-request-id",
+        "user-agent",
+        "content-type"
+    ],
+    # Headers to redact in outgoing requests
+    redact_headers=[
+        "authorization",
+        "cookie",
+        "x-api-key"
+    ],
+    # Wildcard patterns (default includes x-*)
+    header_patterns=["x-*"]
+)
 ```
 
 ## 🎯 Usage Examples

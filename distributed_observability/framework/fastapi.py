@@ -99,22 +99,32 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
                 current_span.set_attribute("service.port", getattr(self.tracing_config, 'service_port', 8000))
                 current_span.set_attribute("client.ip", client_host)
 
-                # Add request headers as span attributes
-                request_id = headers_dict.get('x-request-id')
-                if request_id and request_id != 'not-found':
-                    current_span.set_attribute("cloudfront.request_id", request_id)
-                    current_span.set_attribute("x-request-id", request_id)
-                    current_span.set_attribute("http.request.header.x-request-id", request_id)
+                # Add request headers as span attributes based on configuration
+                for header_name, header_value in headers_dict.items():
+                    # Skip empty or 'not-found' values
+                    if not header_value or header_value == 'not-found':
+                        continue
 
-                # Add CloudFront/Lambda@Edge specific attributes
-                edge_location = headers_dict.get('x-edge-location')
-                if edge_location and edge_location != 'not-found':
-                    current_span.set_attribute("cloudfront.edge_location", edge_location)
-                    current_span.set_attribute("x-edge-location", edge_location)
+                    # Check if this header should be captured
+                    if self.fastapi_config.should_capture_header(header_name):
+                        # Check if this header should be redacted
+                        if self.fastapi_config.should_redact_header(header_name):
+                            value_to_set = "[REDACTED]"
+                        else:
+                            value_to_set = header_value
 
-                cf_id = headers_dict.get('x-amz-cf-id')
-                if cf_id and cf_id != 'not-found':
-                    current_span.set_attribute("cloudfront.distribution_id", cf_id)
+                        # Set the header as a span attribute
+                        current_span.set_attribute(f"http.request.header.{header_name}", value_to_set)
+
+                        # Add backward compatibility for specific headers
+                        if header_name == 'x-request-id':
+                            current_span.set_attribute("cloudfront.request_id", value_to_set)
+                            current_span.set_attribute("x-request-id", value_to_set)
+                        elif header_name == 'x-edge-location':
+                            current_span.set_attribute("cloudfront.edge_location", value_to_set)
+                            current_span.set_attribute("x-edge-location", value_to_set)
+                        elif header_name == 'x-amz-cf-id':
+                            current_span.set_attribute("cloudfront.distribution_id", value_to_set)
 
                 # Add multiple correlation ID attribute formats for compatibility
                 if correlation_id:

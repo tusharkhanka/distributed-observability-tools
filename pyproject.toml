@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "distributed-observability-tools"
-version = "0.1.0"
+version = "0.1.1"
 description = "Comprehensive observability tools for distributed systems - tracing, correlation, and metrics"
 authors = ["Tushar Khanka <tusharkhanka@gmail.com>"]
 license = "MIT"
@@ -32,8 +32,13 @@ opentelemetry-sdk = "^1.21.0"
 opentelemetry-exporter-otlp-proto-grpc = "^1.21.0"
 opentelemetry-instrumentation-fastapi = {version = "^0.42b0", optional = true}
 opentelemetry-instrumentation-httpx = {version = "^0.42b0", optional = true}
+opentelemetry-instrumentation-sqlalchemy = {version = "^0.42b0", optional = true}
+opentelemetry-instrumentation-redis = {version = "^0.42b0", optional = true}
+opentelemetry-instrumentation-botocore = {version = "^0.42b0", optional = true}
+opentelemetry-instrumentation-grpc = {version = "^0.42b0", optional = true}
 fastapi = {version = "^0.104.0", optional = true}
 httpx = {version = "^0.25.0", optional = true}
+celery = {version = "^5.3.0", optional = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
@@ -45,7 +50,19 @@ pytest-asyncio = "^0.21.0"
 [tool.poetry.extras]
 fastapi = ["fastapi", "opentelemetry-instrumentation-fastapi"]
 httpx = ["httpx", "opentelemetry-instrumentation-httpx"]
-all = ["fastapi", "httpx", "opentelemetry-instrumentation-fastapi", "opentelemetry-instrumentation-httpx"]
+celery = ["celery"]
+database = ["opentelemetry-instrumentation-sqlalchemy", "opentelemetry-instrumentation-redis"]
+aws = ["opentelemetry-instrumentation-botocore"]
+grpc = ["opentelemetry-instrumentation-grpc"]
+all = [
+    "fastapi", "httpx", "celery",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-sqlalchemy",
+    "opentelemetry-instrumentation-redis",
+    "opentelemetry-instrumentation-botocore",
+    "opentelemetry-instrumentation-grpc"
+]
 
 [build-system]
 requires = ["poetry-core"]
