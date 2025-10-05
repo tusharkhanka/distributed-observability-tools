@@ -52,7 +52,7 @@ class TracingManager:
                 "service.version": self.config.service_version,
                 "service.instance.id": str(uuid.uuid4()),
                 "telemetry.sdk.name": "distributed-observability-tools",
-                "telemetry.sdk.version": "0.1.1",
+                "telemetry.sdk.version": "0.1.3",
             }
 
             # Add custom resource attributes
@@ -154,11 +154,45 @@ class TracingManager:
         return self._is_setup and self._tracer is not None
 
 
-def setup_tracing(config: TracingConfig):
+def setup_tracing(config: TracingConfig, app=None, fastapi_config=None):
     """Convenience function to initialize tracing from config.
+
+    This function sets up the OpenTelemetry tracer provider and optionally
+    instruments a FastAPI application for automatic HTTP request tracing.
+
+    Args:
+        config: TracingConfig instance with service name, collector URL, etc.
+        app: Optional FastAPI application instance. If provided, the app will be
+             automatically instrumented for HTTP request tracing using FastAPIInstrumentor.
+        fastapi_config: Optional FastAPIConfig instance for configuring header capture.
+                       Only used when app is provided.
 
     Returns:
         Tuple of (TracingManager, (RequestTracingMiddleware, kwargs_dict))
+
+    Example:
+        # Automatic instrumentation (recommended):
+        from fastapi import FastAPI
+        from distributed_observability import setup_tracing, TracingConfig, FastAPIConfig
+
+        config = TracingConfig(service_name="my-service")
+        fastapi_config = FastAPIConfig(capture_request_headers=["x-correlation-id"])
+
+        app = FastAPI()
+        manager, middleware = setup_tracing(config, app=app, fastapi_config=fastapi_config)
+
+        middleware_class, middleware_kwargs = middleware
+        app.add_middleware(middleware_class, **middleware_kwargs)
+
+        # Manual instrumentation (advanced):
+        manager, middleware = setup_tracing(config)
+        app = FastAPI()
+        instrument_fastapi_app(app, config, fastapi_config)
+        app.add_middleware(middleware_class, **middleware_kwargs)
+
+    Note:
+        For HTTP request tracing to work, you must install the package with FastAPI extras:
+        pip install distributed-observability-tools[fastapi]
     """
     from ..framework.fastapi import RequestTracingMiddleware
 
@@ -166,6 +200,23 @@ def setup_tracing(config: TracingConfig):
     success = manager.setup()  # Setup regardless of success for graceful degradation
 
     logger.info(f"Tracing setup {'successful' if success else 'failed with graceful degradation'}")
+
+    # Auto-instrument FastAPI if app is provided
+    if app is not None:
+        try:
+            instrument_success = instrument_fastapi_app(app, config, fastapi_config)
+            if instrument_success:
+                logger.info("FastAPI application auto-instrumented successfully")
+            else:
+                logger.warning("FastAPI auto-instrumentation returned False - check logs for details")
+        except ImportError as e:
+            logger.error(
+                f"FastAPI auto-instrumentation failed: {e}. "
+                "The opentelemetry-instrumentation-fastapi package is not installed. "
+                "Install with: pip install distributed-observability-tools[fastapi]"
+            )
+        except Exception as e:
+            logger.warning(f"FastAPI auto-instrumentation failed with unexpected error: {e}")
 
     # Return manager and middleware configuration - pass TracingConfig object directly
     # FastAPI's add_middleware will call: RequestTracingMiddleware(app, tracing_config=config)

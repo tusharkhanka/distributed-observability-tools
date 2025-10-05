@@ -14,7 +14,7 @@ A comprehensive Python package for observability in distributed systems, providi
 # Basic installation (core tracing only)
 pip install distributed-observability-tools
 
-# With FastAPI support
+# With FastAPI support (REQUIRED for HTTP request tracing)
 pip install distributed-observability-tools[fastapi]
 
 # With HTTP client support
@@ -23,6 +23,8 @@ pip install distributed-observability-tools[httpx]
 # Full installation (all features)
 pip install distributed-observability-tools[all]
 ```
+
+> **⚠️ Important**: For FastAPI applications, you **must** install with the `[fastapi]` extras to enable HTTP request tracing. Without this, only database and other instrumentations will work, but HTTP spans will not be created.
 
 ### Basic Usage
 
@@ -41,8 +43,10 @@ tracer_manager, middleware = setup_tracing(config)
 
 ### FastAPI Integration
 
+**New in v0.1.3**: Automatic FastAPI instrumentation! 🎉
+
 ```python
-from distributed_observability import TracingConfig, setup_tracing
+from distributed_observability import TracingConfig, FastAPIConfig, setup_tracing
 from fastapi import FastAPI
 
 # Configure tracing
@@ -51,12 +55,54 @@ config = TracingConfig(
     collector_url="http://otel-collector:4317"
 )
 
-# Setup tracing
+# Configure header capture (optional)
+fastapi_config = FastAPIConfig(
+    capture_request_headers=["x-correlation-id", "user-agent"]
+)
+
+# Create FastAPI app
+app = FastAPI()
+
+# Setup tracing with automatic instrumentation (recommended)
+tracer_manager, middleware = setup_tracing(
+    config,
+    app=app,  # Pass app for auto-instrumentation
+    fastapi_config=fastapi_config
+)
+
+# Add middleware for correlation ID propagation
+middleware_class, middleware_kwargs = middleware
+app.add_middleware(middleware_class, **middleware_kwargs)
+```
+
+**What this does**:
+- ✅ Creates HTTP request spans (GET /api/users, POST /api/orders, etc.)
+- ✅ Captures HTTP method, status code, URL path
+- ✅ Extracts and propagates correlation IDs from headers
+- ✅ Instruments database queries (SQLAlchemy, Redis, etc.)
+- ✅ Creates complete distributed trace trees
+
+**Manual instrumentation** (advanced users):
+
+```python
+from distributed_observability import TracingConfig, setup_tracing
+from distributed_observability.tracing.tracer import instrument_fastapi_app
+from fastapi import FastAPI
+
+config = TracingConfig(service_name="my-service")
+
+# Setup tracing first
 tracer_manager, middleware = setup_tracing(config)
 
-# Add to FastAPI app
+# Create app
 app = FastAPI()
-app.add_middleware(middleware)
+
+# Manually instrument FastAPI
+instrument_fastapi_app(app, config, fastapi_config)
+
+# Add middleware
+middleware_class, middleware_kwargs = middleware
+app.add_middleware(middleware_class, **middleware_kwargs)
 ```
 
 ### Advanced Configuration

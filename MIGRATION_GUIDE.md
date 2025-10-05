@@ -1,6 +1,227 @@
-# Migration Guide: From Embedded Middleware to Distributed Observability Package
+# Migration Guide: Distributed Observability Tools
 
-This guide shows how to migrate from the embedded middleware in `POC-docker-only/shared/middleware.py` to the new production-grade `distributed-observability-tools` package.
+This guide covers:
+1. Migrating from embedded middleware to the distributed-observability-tools package
+2. **Upgrading from v0.1.2 to v0.1.3** (new auto-instrumentation feature)
+
+
+---
+
+## 🆕 Migrating from v0.1.2 to v0.1.3
+
+### What's New in v0.1.3
+
+**Major Enhancement**: Automatic FastAPI instrumentation! 🎉
+
+Version 0.1.3 introduces automatic HTTP request tracing when you pass your FastAPI app to `setup_tracing()`. This eliminates the need to manually call `instrument_fastapi_app()` and ensures HTTP spans are always created.
+
+### Breaking Changes
+
+**None** - v0.1.3 is fully backward compatible with v0.1.2.
+
+### Installation Changes
+
+**Before (v0.1.2)**:
+```bash
+pip install distributed-observability-tools>=0.1.2
+```
+
+**After (v0.1.3 - REQUIRED for HTTP tracing)**:
+```bash
+pip install distributed-observability-tools[fastapi]>=0.1.3
+```
+
+> **⚠️ Critical**: The `[fastapi]` extras are **required** for HTTP request tracing. Without them, `opentelemetry-instrumentation-fastapi` will not be installed, and HTTP spans will not be created (only database/Redis spans will work).
+
+### Code Migration
+
+#### Option 1: New Auto-Instrumentation (Recommended)
+
+**Before (v0.1.2)**:
+```python
+from distributed_observability import TracingConfig, setup_tracing
+from fastapi import FastAPI
+
+config = TracingConfig(service_name="my-service")
+tracer_manager, middleware = setup_tracing(config)
+
+app = FastAPI()
+
+# Middleware only - NO HTTP spans created!
+middleware_class, middleware_kwargs = middleware
+app.add_middleware(middleware_class, **middleware_kwargs)
+```
+
+**After (v0.1.3 - Recommended)**:
+```python
+from distributed_observability import TracingConfig, FastAPIConfig, setup_tracing
+from fastapi import FastAPI
+
+config = TracingConfig(service_name="my-service")
+fastapi_config = FastAPIConfig(
+    capture_request_headers=["x-correlation-id", "user-agent"]
+)
+
+# Create app FIRST
+app = FastAPI()
+
+# Pass app to setup_tracing for auto-instrumentation
+tracer_manager, middleware = setup_tracing(
+    config,
+    app=app,  # ✅ Auto-instruments FastAPI
+    fastapi_config=fastapi_config
+)
+
+# Add middleware
+middleware_class, middleware_kwargs = middleware
+app.add_middleware(middleware_class, **middleware_kwargs)
+```
+
+**What changed**:
+- ✅ Create `FastAPI()` app **before** calling `setup_tracing()`
+- ✅ Pass `app=app` parameter to `setup_tracing()`
+- ✅ Pass `fastapi_config=fastapi_config` for header capture configuration
+- ✅ HTTP spans are now automatically created!
+
+#### Option 2: Manual Instrumentation (Advanced)
+
+If you need more control, you can still manually instrument:
+
+```python
+from distributed_observability import TracingConfig, setup_tracing
+from distributed_observability.tracing.tracer import instrument_fastapi_app
+from fastapi import FastAPI
+
+config = TracingConfig(service_name="my-service")
+
+# Setup tracing without app
+tracer_manager, middleware = setup_tracing(config)
+
+# Create app
+app = FastAPI()
+
+# Manually instrument
+instrument_fastapi_app(app, config, fastapi_config)
+
+# Add middleware
+middleware_class, middleware_kwargs = middleware
+app.add_middleware(middleware_class, **middleware_kwargs)
+```
+
+### What You Get with v0.1.3
+
+**HTTP Request Spans** (NEW):
+- Span names: `GET /health`, `POST /api/users`, etc.
+- Attributes: `http.method`, `http.status_code`, `http.target`, `http.url`
+
+**Correlation ID Capture**:
+- Automatically extracted from `x-correlation-id` header
+- Added as span attribute: `correlation_id`
+- Propagated to downstream services
+
+**Complete Trace Trees**:
+```
+GET /api/users (HTTP span - ROOT)
+├── correlation_id: "abc-123"
+├── http.method: "GET"
+├── http.status_code: 200
+├── SELECT users (Database span - CHILD)
+│   └── duration: 2.5ms
+└── GET redis://cache (Redis span - CHILD)
+    └── duration: 0.8ms
+```
+
+### Troubleshooting
+
+#### Problem: HTTP spans not appearing in traces
+
+**Symptom**: Only database/Redis spans visible, no HTTP request spans
+
+**Solution**:
+1. Verify installation includes `[fastapi]` extras:
+   ```bash
+   pip list | grep opentelemetry-instrumentation-fastapi
+   # Should show: opentelemetry-instrumentation-fastapi  0.58b0 (or similar)
+   ```
+
+2. If missing, reinstall:
+   ```bash
+   pip install distributed-observability-tools[fastapi]>=0.1.3
+   ```
+
+3. Verify you're passing `app` to `setup_tracing()`:
+   ```python
+   tracer_manager, middleware = setup_tracing(config, app=app)  # ✅ Correct
+   ```
+
+#### Problem: Correlation IDs not captured
+
+**Solution**: Make sure you're using `FastAPIConfig` with header capture:
+
+```python
+from distributed_observability import FastAPIConfig
+
+fastapi_config = FastAPIConfig(
+    capture_request_headers=["x-correlation-id"]
+)
+
+tracer_manager, middleware = setup_tracing(
+    config,
+    app=app,
+    fastapi_config=fastapi_config  # ✅ Required for correlation ID
+)
+```
+
+### Migration Checklist
+
+- [ ] Update `requirements.txt` to include `[fastapi]` extras
+- [ ] Update to version `>=0.1.3`
+- [ ] Move `app = FastAPI()` **before** `setup_tracing()` call
+- [ ] Add `app=app` parameter to `setup_tracing()`
+- [ ] Add `fastapi_config` with correlation ID headers
+- [ ] Test that HTTP spans appear in your observability platform
+- [ ] Verify correlation IDs are captured in span attributes
+
+### Example: Complete Migration
+
+**requirements.txt**:
+```diff
+- distributed-observability-tools>=0.1.2
++ distributed-observability-tools[fastapi]>=0.1.3
+```
+
+**main.py**:
+```diff
+  from distributed_observability import TracingConfig, setup_tracing
++ from distributed_observability import FastAPIConfig
+  from fastapi import FastAPI
+
+  config = TracingConfig(
+      service_name="my-service",
+      collector_url="http://localhost:4317"
+  )
+
++ fastapi_config = FastAPIConfig(
++     capture_request_headers=["x-correlation-id", "user-agent"]
++ )
+
++ # Create app FIRST
++ app = FastAPI()
++
+- tracer_manager, middleware = setup_tracing(config)
++ tracer_manager, middleware = setup_tracing(
++     config,
++     app=app,
++     fastapi_config=fastapi_config
++ )
+
+- app = FastAPI()
+  middleware_class, middleware_kwargs = middleware
+  app.add_middleware(middleware_class, **middleware_kwargs)
+```
+
+---
+
 
 ## 🚀 Quick Migration Overview
 
